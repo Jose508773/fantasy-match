@@ -11,3 +11,5 @@ Original prompt: make me a fun mathing fantasy type game where you have fantasy 
 - Canvas art overhaul: replaced emoji-like orb feel with faceted relic treatment, custom sigils per piece type, stronger special rune halos, and a more ominous moonlit board backdrop.
 - Layout cleanup pass: removed the duplicate in-canvas hero treatment that was colliding with the page header, tightened the ritual HUD, and moved the menu overlay out of the board space.
 - Audio pass: added generated fantasy ambience, match chimes, miss/fizzle tones, selection clicks, and a sound toggle without introducing external audio assets.
+- Input polish pass: converted the board to pointer-based controls so both tap-select and drag-swipe swaps work on mouse and touch.
+- Audio reliability pass: added first-interaction audio unlock handling, a clearer sound toggle state, and restartable ambience after mute/unmute.

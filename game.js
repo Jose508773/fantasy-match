@@ -41,8 +41,17 @@ const audioState = {
   enabled: true,
   context: null,
   master: null,
-  ambienceStarted: false,
+  ambienceUnlocked: false,
+  ambienceNodes: [],
   ambienceTimer: null,
+};
+
+const inputState = {
+  pointerDown: false,
+  startCell: null,
+  startPoint: null,
+  priorSelected: null,
+  dragConsumed: false,
 };
 
 function hexToRgba(hex, alpha) {
@@ -82,13 +91,30 @@ function ensureAudio() {
     if (!AudioCtor) return null;
     audioState.context = new AudioCtor();
     audioState.master = audioState.context.createGain();
-    audioState.master.gain.value = 0.12;
+    audioState.master.gain.value = 0.16;
     audioState.master.connect(audioState.context.destination);
   }
-  if (audioState.context.state === "suspended") {
-    audioState.context.resume();
-  }
   return audioState.context;
+}
+
+async function unlockAudio() {
+  const ctxAudio = ensureAudio();
+  if (!ctxAudio) return false;
+  if (ctxAudio.state === "suspended") {
+    try {
+      await ctxAudio.resume();
+    } catch {
+      return false;
+    }
+  }
+  if (!audioState.ambienceUnlocked) {
+    audioState.ambienceUnlocked = true;
+    startAmbience();
+  } else if (!audioState.ambienceTimer && audioState.enabled) {
+    scheduleAmbienceBell();
+  }
+  updateAudioButton();
+  return true;
 }
 
 function createEnvelope(now, length, attack = 0.02, peak = 0.15, release = 0.14) {
@@ -174,7 +200,7 @@ function playStartSound() {
 }
 
 function scheduleAmbienceBell() {
-  if (!audioState.enabled || !audioState.ambienceStarted) return;
+  if (!audioState.enabled || !audioState.ambienceUnlocked) return;
   const gap = 4200 + Math.random() * 2400;
   audioState.ambienceTimer = window.setTimeout(() => {
     playTone({ type: "sine", frequency: 262, length: 0.9, peak: 0.03 });
@@ -186,8 +212,7 @@ function scheduleAmbienceBell() {
 
 function startAmbience() {
   const ctxAudio = ensureAudio();
-  if (!ctxAudio || audioState.ambienceStarted) return;
-  audioState.ambienceStarted = true;
+  if (!ctxAudio || audioState.ambienceNodes.length > 0) return;
 
   const drone = ctxAudio.createOscillator();
   const droneGain = ctxAudio.createGain();
@@ -211,14 +236,24 @@ function startAmbience() {
   upperGain.connect(audioState.master);
   upper.start();
 
+  audioState.ambienceNodes.push(drone, upper);
   scheduleAmbienceBell();
+}
+
+function updateAudioButton() {
+  const label = !audioState.enabled
+    ? "Sound Off"
+    : audioState.ambienceUnlocked
+      ? "Sound On"
+      : "Enable Sound";
+  audioButton.textContent = label;
+  audioButton.classList.toggle("is-muted", !audioState.enabled);
+  audioButton.classList.toggle("is-pending", audioState.enabled && !audioState.ambienceUnlocked);
+  audioButton.setAttribute("aria-pressed", String(audioState.enabled));
 }
 
 function setAudioEnabled(nextEnabled) {
   audioState.enabled = nextEnabled;
-  audioButton.textContent = nextEnabled ? "Sound On" : "Sound Off";
-  audioButton.classList.toggle("is-muted", !nextEnabled);
-  audioButton.setAttribute("aria-pressed", String(nextEnabled));
   if (!nextEnabled) {
     if (audioState.master) audioState.master.gain.value = 0.0001;
     if (audioState.ambienceTimer) {
@@ -227,9 +262,13 @@ function setAudioEnabled(nextEnabled) {
     }
   } else {
     ensureAudio();
-    if (audioState.master) audioState.master.gain.value = 0.12;
-    startAmbience();
+    if (audioState.master) audioState.master.gain.value = 0.16;
+    if (audioState.ambienceUnlocked) {
+      startAmbience();
+      if (!audioState.ambienceTimer) scheduleAmbienceBell();
+    }
   }
+  updateAudioButton();
 }
 
 function makeBoard() {
@@ -266,7 +305,6 @@ function resetGame() {
   state.resolving = false;
   state.mode = "playing";
   playStartSound();
-  startAmbience();
   resolveBoard(true);
 }
 
@@ -525,6 +563,11 @@ function trySwap(a, b) {
   }
 }
 
+function handleBoardInteraction(cell) {
+  if (!cell || state.mode !== "playing") return;
+  onSelectCell(cell);
+}
+
 function onSelectCell(cell) {
   if (!cell || state.mode !== "playing") return;
   if (!state.selected) {
@@ -553,8 +596,8 @@ function pointerPosition(event) {
   const rect = canvas.getBoundingClientRect();
   const scaleX = canvas.width / rect.width;
   const scaleY = canvas.height / rect.height;
-  const clientX = event.touches ? event.touches[0].clientX : event.clientX;
-  const clientY = event.touches ? event.touches[0].clientY : event.clientY;
+  const clientX = event.clientX;
+  const clientY = event.clientY;
   return {
     x: (clientX - rect.left) * scaleX,
     y: (clientY - rect.top) * scaleY,
@@ -950,22 +993,22 @@ function drawParticles() {
 function drawMenuOverlay() {
   if (state.mode === "playing") return;
   ctx.fillStyle = "rgba(7, 4, 10, 0.44)";
-  roundRect(84, 266, 552, 68, 24);
+  roundRect(98, 274, 524, 60, 22);
   ctx.fill();
   ctx.strokeStyle = "rgba(201, 157, 83, 0.16)";
   ctx.lineWidth = 2;
   ctx.stroke();
   ctx.textAlign = "center";
   ctx.fillStyle = "#f4e3be";
-  ctx.font = '700 24px "Cinzel"';
-  ctx.fillText(state.mode === "menu" ? "The Hollow Ceremony" : "The Rite Is Complete", canvas.width / 2, 293);
-  ctx.font = '500 15px "Cinzel"';
+  ctx.font = '700 20px "Cinzel"';
+  ctx.fillText(state.mode === "menu" ? "The Hollow Ceremony" : "The Rite Is Complete", canvas.width / 2, 295);
+  ctx.font = '500 14px "Cinzel"';
   ctx.fillText(
     state.mode === "menu"
       ? "Match cursed relics, awaken grave sigils, and feed the moonless vault."
       : "Press R or the seal below to begin another descent.",
     canvas.width / 2,
-    318,
+    316,
   );
 }
 
@@ -987,21 +1030,64 @@ function frame(time) {
   requestAnimationFrame(frame);
 }
 
-canvas.addEventListener("mousemove", (event) => {
+canvas.addEventListener("pointermove", (event) => {
   const point = pointerPosition(event);
   state.hovered = boardCellFromPoint(point.x, point.y);
+  if (!inputState.pointerDown || inputState.dragConsumed || !inputState.startCell) return;
+  const cell = boardCellFromPoint(point.x, point.y);
+  if (!cell) return;
+  if (cell.row === inputState.startCell.row && cell.col === inputState.startCell.col) return;
+  if (!areAdjacent(inputState.startCell, cell)) return;
+  state.selected = null;
+  trySwap(inputState.startCell, cell);
+  inputState.dragConsumed = true;
 });
 
-canvas.addEventListener("click", (event) => {
+canvas.addEventListener("pointerdown", async (event) => {
+  await unlockAudio();
   const point = pointerPosition(event);
-  onSelectCell(boardCellFromPoint(point.x, point.y));
-});
-
-canvas.addEventListener("touchstart", (event) => {
-  const point = pointerPosition(event);
-  onSelectCell(boardCellFromPoint(point.x, point.y));
+  inputState.pointerDown = true;
+  inputState.dragConsumed = false;
+  inputState.startPoint = point;
+  inputState.startCell = boardCellFromPoint(point.x, point.y);
+  inputState.priorSelected = state.selected ? { ...state.selected } : null;
+  state.hovered = inputState.startCell;
+  if (inputState.startCell && !inputState.priorSelected) {
+    state.selected = inputState.startCell;
+    state.message = "Drag to a neighboring relic or tap again to confirm.";
+    playSelectSound();
+  }
+  canvas.setPointerCapture?.(event.pointerId);
   event.preventDefault();
-}, { passive: false });
+});
+
+canvas.addEventListener("pointerup", (event) => {
+  const point = pointerPosition(event);
+  const cell = boardCellFromPoint(point.x, point.y);
+  if (!inputState.dragConsumed) {
+    if (cell && inputState.priorSelected) {
+      state.selected = inputState.priorSelected;
+      handleBoardInteraction(cell);
+    } else if (cell && inputState.startCell && areAdjacent(inputState.startCell, cell)) {
+      state.selected = null;
+      trySwap(inputState.startCell, cell);
+    }
+  }
+  inputState.pointerDown = false;
+  inputState.startCell = null;
+  inputState.startPoint = null;
+  inputState.priorSelected = null;
+  inputState.dragConsumed = false;
+  canvas.releasePointerCapture?.(event.pointerId);
+});
+
+canvas.addEventListener("pointercancel", () => {
+  inputState.pointerDown = false;
+  inputState.startCell = null;
+  inputState.startPoint = null;
+  inputState.priorSelected = null;
+  inputState.dragConsumed = false;
+});
 
 window.addEventListener("keydown", (event) => {
   if (event.key.toLowerCase() === "r") {
@@ -1021,17 +1107,24 @@ window.addEventListener("keydown", (event) => {
 });
 
 startButton.addEventListener("click", () => {
-  ensureAudio();
+  unlockAudio();
   resetGame();
   startButton.classList.add("hidden");
 });
 
-audioButton.addEventListener("click", () => {
-  const nextEnabled = !audioState.enabled;
-  setAudioEnabled(nextEnabled);
-  if (nextEnabled) {
+audioButton.addEventListener("click", async () => {
+  if (!audioState.enabled) {
+    setAudioEnabled(true);
+    await unlockAudio();
     playSelectSound();
+    return;
   }
+  if (!audioState.ambienceUnlocked) {
+    await unlockAudio();
+    playSelectSound();
+    return;
+  }
+  setAudioEnabled(false);
 });
 
 function compactBoardState() {
@@ -1068,6 +1161,10 @@ window.__moonlitRelics = {
   resetGame,
   state,
 };
+
+window.addEventListener("keydown", () => {
+  unlockAudio();
+}, { once: true });
 
 state.board = makeBoard();
 setAudioEnabled(true);

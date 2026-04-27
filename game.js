@@ -1,12 +1,13 @@
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
 const startButton = document.getElementById("start-btn");
+const audioButton = document.getElementById("audio-btn");
 
 const COLS = 8;
 const ROWS = 8;
 const CELL = 74;
 const BOARD_X = 64;
-const BOARD_Y = 312;
+const BOARD_Y = 356;
 const BOARD_W = COLS * CELL;
 const BOARD_H = ROWS * CELL;
 const TYPES = [
@@ -34,6 +35,14 @@ const state = {
   queuedResolutions: [],
   resolving: false,
   tick: 0,
+};
+
+const audioState = {
+  enabled: true,
+  context: null,
+  master: null,
+  ambienceStarted: false,
+  ambienceTimer: null,
 };
 
 function hexToRgba(hex, alpha) {
@@ -64,6 +73,163 @@ function createOrb(type = randomType()) {
     pulse: Math.random() * Math.PI * 2,
     special: null,
   };
+}
+
+function ensureAudio() {
+  if (!audioState.enabled) return null;
+  if (!audioState.context) {
+    const AudioCtor = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtor) return null;
+    audioState.context = new AudioCtor();
+    audioState.master = audioState.context.createGain();
+    audioState.master.gain.value = 0.12;
+    audioState.master.connect(audioState.context.destination);
+  }
+  if (audioState.context.state === "suspended") {
+    audioState.context.resume();
+  }
+  return audioState.context;
+}
+
+function createEnvelope(now, length, attack = 0.02, peak = 0.15, release = 0.14) {
+  const ctxAudio = ensureAudio();
+  if (!ctxAudio) return null;
+  const gain = ctxAudio.createGain();
+  gain.gain.setValueAtTime(0.0001, now);
+  gain.gain.linearRampToValueAtTime(peak, now + attack);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + length + release);
+  gain.connect(audioState.master);
+  return gain;
+}
+
+function playTone({
+  type = "sine",
+  frequency = 220,
+  length = 0.24,
+  when = 0,
+  attack = 0.02,
+  peak = 0.15,
+  release = 0.14,
+  detune = 0,
+}) {
+  const ctxAudio = ensureAudio();
+  if (!ctxAudio) return;
+  const now = ctxAudio.currentTime + when;
+  const osc = ctxAudio.createOscillator();
+  const gain = createEnvelope(now, length, attack, peak, release);
+  if (!gain) return;
+  osc.type = type;
+  osc.frequency.setValueAtTime(frequency, now);
+  if (detune) osc.detune.setValueAtTime(detune, now);
+  osc.connect(gain);
+  osc.start(now);
+  osc.stop(now + length + release + 0.02);
+}
+
+function playNoise({ length = 0.18, peak = 0.05, lowpass = 880, when = 0 }) {
+  const ctxAudio = ensureAudio();
+  if (!ctxAudio) return;
+  const buffer = ctxAudio.createBuffer(1, Math.max(1, Math.floor(ctxAudio.sampleRate * length)), ctxAudio.sampleRate);
+  const channel = buffer.getChannelData(0);
+  for (let i = 0; i < channel.length; i += 1) {
+    channel[i] = (Math.random() * 2 - 1) * (1 - i / channel.length);
+  }
+  const source = ctxAudio.createBufferSource();
+  source.buffer = buffer;
+  const filter = ctxAudio.createBiquadFilter();
+  filter.type = "lowpass";
+  filter.frequency.value = lowpass;
+  const now = ctxAudio.currentTime + when;
+  const gain = createEnvelope(now, length, 0.005, peak, 0.12);
+  if (!gain) return;
+  source.connect(filter);
+  filter.connect(gain);
+  source.start(now);
+  source.stop(now + length + 0.15);
+}
+
+function playMatchSound(comboLevel, cleared) {
+  const lift = clamp(comboLevel - 1, 0, 6) * 24;
+  playTone({ type: "triangle", frequency: 392 + lift, length: 0.18, peak: 0.08 });
+  playTone({ type: "sine", frequency: 523 + lift, length: 0.22, peak: 0.06, when: 0.06 });
+  if (cleared >= 4) {
+    playTone({ type: "sine", frequency: 784 + lift, length: 0.28, peak: 0.04, when: 0.08 });
+  }
+}
+
+function playMissSound() {
+  playTone({ type: "sawtooth", frequency: 178, length: 0.12, peak: 0.05 });
+  playTone({ type: "triangle", frequency: 146, length: 0.2, peak: 0.035, when: 0.05 });
+  playNoise({ length: 0.1, peak: 0.015, lowpass: 520 });
+}
+
+function playSelectSound() {
+  playTone({ type: "triangle", frequency: 294, length: 0.08, peak: 0.035 });
+}
+
+function playStartSound() {
+  playTone({ type: "sine", frequency: 220, length: 0.25, peak: 0.05 });
+  playTone({ type: "triangle", frequency: 330, length: 0.35, peak: 0.06, when: 0.12 });
+  playTone({ type: "sine", frequency: 440, length: 0.42, peak: 0.05, when: 0.24 });
+}
+
+function scheduleAmbienceBell() {
+  if (!audioState.enabled || !audioState.ambienceStarted) return;
+  const gap = 4200 + Math.random() * 2400;
+  audioState.ambienceTimer = window.setTimeout(() => {
+    playTone({ type: "sine", frequency: 262, length: 0.9, peak: 0.03 });
+    playTone({ type: "triangle", frequency: 393, length: 0.8, peak: 0.018, when: 0.14 });
+    playNoise({ length: 0.4, peak: 0.008, lowpass: 1200 });
+    scheduleAmbienceBell();
+  }, gap);
+}
+
+function startAmbience() {
+  const ctxAudio = ensureAudio();
+  if (!ctxAudio || audioState.ambienceStarted) return;
+  audioState.ambienceStarted = true;
+
+  const drone = ctxAudio.createOscillator();
+  const droneGain = ctxAudio.createGain();
+  const droneFilter = ctxAudio.createBiquadFilter();
+  drone.type = "sawtooth";
+  drone.frequency.value = 73.4;
+  droneFilter.type = "lowpass";
+  droneFilter.frequency.value = 320;
+  droneGain.gain.value = 0.018;
+  drone.connect(droneFilter);
+  droneFilter.connect(droneGain);
+  droneGain.connect(audioState.master);
+  drone.start();
+
+  const upper = ctxAudio.createOscillator();
+  const upperGain = ctxAudio.createGain();
+  upper.type = "triangle";
+  upper.frequency.value = 146.8;
+  upperGain.gain.value = 0.008;
+  upper.connect(upperGain);
+  upperGain.connect(audioState.master);
+  upper.start();
+
+  scheduleAmbienceBell();
+}
+
+function setAudioEnabled(nextEnabled) {
+  audioState.enabled = nextEnabled;
+  audioButton.textContent = nextEnabled ? "Sound On" : "Sound Off";
+  audioButton.classList.toggle("is-muted", !nextEnabled);
+  audioButton.setAttribute("aria-pressed", String(nextEnabled));
+  if (!nextEnabled) {
+    if (audioState.master) audioState.master.gain.value = 0.0001;
+    if (audioState.ambienceTimer) {
+      clearTimeout(audioState.ambienceTimer);
+      audioState.ambienceTimer = null;
+    }
+  } else {
+    ensureAudio();
+    if (audioState.master) audioState.master.gain.value = 0.12;
+    startAmbience();
+  }
 }
 
 function makeBoard() {
@@ -99,6 +265,8 @@ function resetGame() {
   state.queuedResolutions = [];
   state.resolving = false;
   state.mode = "playing";
+  playStartSound();
+  startAmbience();
   resolveBoard(true);
 }
 
@@ -260,6 +428,7 @@ function clearMatches(groups, initial) {
   state.score += points;
   state.mana = Math.min(100, state.mana + matchSet.length * 4 + state.combo * 2);
   state.message = state.combo > 1 ? `Arcane cascade x${state.combo}!` : "A relic chain shatters into stardust.";
+  playMatchSound(state.combo, matchSet.length);
 
   for (const cell of matchSet) {
     state.board[cell.row][cell.col] = null;
@@ -316,7 +485,7 @@ function resolveBoard(initial = false) {
   }
   if (state.moves <= 0) {
     state.mode = "gameover";
-    state.message = state.score >= state.goal ? "The kingdom celebrates your vault of relics." : "The moon fades. One more run.";
+    state.message = state.score >= state.goal ? "The Hollow Court accepts your offering." : "The moon fades. The vault remains hungry.";
   }
 }
 
@@ -352,6 +521,7 @@ function trySwap(a, b) {
     swapCells(a, b);
     state.combo = 0;
     state.message = "That spell fizzled. Seek a truer pairing.";
+    playMissSound();
   }
 }
 
@@ -360,6 +530,7 @@ function onSelectCell(cell) {
   if (!state.selected) {
     state.selected = cell;
     state.message = "Choose a neighboring relic to swap.";
+    playSelectSound();
     return;
   }
   if (state.selected.row === cell.row && state.selected.col === cell.col) {
@@ -375,6 +546,7 @@ function onSelectCell(cell) {
   }
   state.selected = cell;
   state.message = "A new relic is marked.";
+  playSelectSound();
 }
 
 function pointerPosition(event) {
@@ -582,14 +754,11 @@ function drawBackground() {
 
 function drawHeader() {
   ctx.textAlign = "left";
-  ctx.fillStyle = "#efddbc";
-  ctx.font = '800 58px "Uncial Antiqua"';
-  ctx.fillText("Moonlit Relics", 58, 94);
-  ctx.font = '500 24px "Cinzel"';
-  ctx.fillStyle = "rgba(229, 216, 191, 0.82)";
-  ctx.fillText("Bleed relics, break sigils, and tithe the Hollow Court.", 60, 130);
+  ctx.fillStyle = "rgba(220, 191, 141, 0.8)";
+  ctx.font = '600 18px "Cinzel"';
+  ctx.fillText("Ritual Ledger", 58, 92);
 
-  roundRect(54, 160, 612, 112, 28);
+  roundRect(54, 110, 612, 138, 28);
   ctx.fillStyle = "rgba(9, 7, 13, 0.56)";
   ctx.fill();
   ctx.strokeStyle = "rgba(201, 157, 83, 0.18)";
@@ -600,31 +769,37 @@ function drawHeader() {
     ["Score", state.score],
     ["Moves", state.moves],
     ["Goal", state.goal],
-    ["Combo", `x${state.bestCombo}`],
   ];
   stats.forEach(([label, value], index) => {
-    const x = 82 + index * 145;
+    const x = 86 + index * 186;
     ctx.fillStyle = "rgba(212, 180, 125, 0.78)";
     ctx.font = '600 18px "Cinzel"';
-    ctx.fillText(label, x, 195);
+    ctx.fillText(label, x, 148);
     ctx.fillStyle = "#f7edd4";
     ctx.font = '700 32px "Cinzel"';
-    ctx.fillText(String(value), x, 232);
+    ctx.fillText(String(value), x, 184);
   });
+
+  ctx.fillStyle = "rgba(212, 180, 125, 0.78)";
+  ctx.font = '600 18px "Cinzel"';
+  ctx.fillText("Combo", 88, 222);
+  ctx.fillStyle = "#f7edd4";
+  ctx.font = '700 28px "Cinzel"';
+  ctx.fillText(`x${state.bestCombo}`, 88, 246);
 
   ctx.fillStyle = "rgba(220, 191, 141, 0.8)";
   ctx.font = '600 16px "Cinzel"';
-  ctx.fillText("Mana", 548, 196);
-  roundRect(548, 208, 92, 18, 9);
+  ctx.fillText("Mana", 454, 222);
+  roundRect(454, 230, 170, 18, 9);
   ctx.fillStyle = "rgba(255,255,255,0.05)";
   ctx.fill();
-  roundRect(548, 208, 92 * (state.mana / 100), 18, 9);
+  roundRect(454, 230, 170 * (state.mana / 100), 18, 9);
   ctx.fillStyle = "#7b4fd0";
   ctx.fill();
 
-  ctx.font = '500 19px "Cinzel"';
+  ctx.font = '500 17px "Cinzel"';
   ctx.fillStyle = "rgba(241, 229, 202, 0.9)";
-  ctx.fillText(state.message, 60, 268);
+  ctx.fillText(state.message, 166, 246);
 }
 
 function drawBoard() {
@@ -726,7 +901,7 @@ function drawBoard() {
 }
 
 function drawFooter() {
-  roundRect(54, 955, 612, 240, 28);
+  roundRect(54, 980, 612, 186, 28);
   ctx.fillStyle = "rgba(10, 7, 14, 0.7)";
   ctx.fill();
   ctx.strokeStyle = "rgba(201, 157, 83, 0.14)";
@@ -736,28 +911,28 @@ function drawFooter() {
   ctx.textAlign = "left";
   ctx.fillStyle = "#dfc286";
   ctx.font = '700 24px "Cinzel"';
-  ctx.fillText("Ledger Of The Hollow Court", 76, 995);
+  ctx.fillText("Ledger Of The Hollow Court", 76, 1018);
 
   ctx.font = '500 20px "Cinzel"';
   ctx.fillStyle = "rgba(241, 229, 202, 0.84)";
-  ctx.fillText(`Vault tithe: ${Math.min(100, Math.round((state.score / state.goal) * 100))}%`, 76, 1034);
-  ctx.fillText(`Dark cascade: x${state.bestCombo}`, 76, 1072);
-  ctx.fillText(`Forbidden mana: ${state.mana}/100`, 76, 1110);
+  ctx.fillText(`Vault tithe: ${Math.min(100, Math.round((state.score / state.goal) * 100))}%`, 76, 1052);
+  ctx.fillText(`Dark cascade: x${state.bestCombo}`, 76, 1086);
+  ctx.fillText(`Forbidden mana: ${state.mana}/100`, 76, 1120);
 
   ctx.fillStyle = "rgba(225, 202, 159, 0.68)";
   ctx.font = '500 18px "Cinzel"';
-  ctx.fillText("Four relics forge line hexes. Five relics awaken a graveburst sigil.", 76, 1164);
+  ctx.fillText("Four relics forge line hexes. Five relics awaken a graveburst sigil.", 76, 1149);
 
   if (state.mode === "menu") {
     ctx.fillStyle = "rgba(244, 229, 201, 0.92)";
-    ctx.font = '700 28px "Cinzel"';
-    ctx.fillText("Step into the rite with the seal below.", 76, 1088);
+    ctx.font = '700 24px "Cinzel"';
+    ctx.fillText("Step into the rite with the seal below.", 320, 1086);
   }
 
   if (state.mode === "gameover") {
     ctx.fillStyle = state.score >= state.goal ? "#d9d0ff" : "#ffcfb8";
-    ctx.font = '700 28px "Cinzel"';
-    ctx.fillText(state.score >= state.goal ? "The court accepts your offering." : "The vault remains unsated.", 76, 1088);
+    ctx.font = '700 24px "Cinzel"';
+    ctx.fillText(state.score >= state.goal ? "The court accepts your offering." : "The vault remains unsated.", 320, 1086);
   }
 }
 
@@ -775,22 +950,22 @@ function drawParticles() {
 function drawMenuOverlay() {
   if (state.mode === "playing") return;
   ctx.fillStyle = "rgba(7, 4, 10, 0.44)";
-  roundRect(84, 400, 552, 196, 28);
+  roundRect(84, 266, 552, 68, 24);
   ctx.fill();
   ctx.strokeStyle = "rgba(201, 157, 83, 0.16)";
   ctx.lineWidth = 2;
   ctx.stroke();
   ctx.textAlign = "center";
   ctx.fillStyle = "#f4e3be";
-  ctx.font = '700 36px "Cinzel"';
-  ctx.fillText(state.mode === "menu" ? "The Hollow Ceremony" : "The Rite Is Complete", canvas.width / 2, 470);
-  ctx.font = '500 22px "Cinzel"';
+  ctx.font = '700 24px "Cinzel"';
+  ctx.fillText(state.mode === "menu" ? "The Hollow Ceremony" : "The Rite Is Complete", canvas.width / 2, 293);
+  ctx.font = '500 15px "Cinzel"';
   ctx.fillText(
     state.mode === "menu"
       ? "Match cursed relics, awaken grave sigils, and feed the moonless vault."
       : "Press R or the seal below to begin another descent.",
     canvas.width / 2,
-    518,
+    318,
   );
 }
 
@@ -846,8 +1021,17 @@ window.addEventListener("keydown", (event) => {
 });
 
 startButton.addEventListener("click", () => {
+  ensureAudio();
   resetGame();
   startButton.classList.add("hidden");
+});
+
+audioButton.addEventListener("click", () => {
+  const nextEnabled = !audioState.enabled;
+  setAudioEnabled(nextEnabled);
+  if (nextEnabled) {
+    playSelectSound();
+  }
 });
 
 function compactBoardState() {
@@ -886,5 +1070,6 @@ window.__moonlitRelics = {
 };
 
 state.board = makeBoard();
+setAudioEnabled(true);
 render();
 requestAnimationFrame(frame);

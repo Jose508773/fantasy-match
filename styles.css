@@ -195,6 +195,29 @@ canvas {
     box-shadow 180ms ease;
 }
 
+.audio-btn {
+  position: absolute;
+  top: 26px;
+  right: 28px;
+  border: 1px solid rgba(201, 157, 83, 0.24);
+  border-radius: 999px;
+  padding: 10px 14px;
+  font: inherit;
+  font-size: 0.76rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(247, 234, 208, 0.92);
+  background: rgba(16, 12, 23, 0.72);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  cursor: pointer;
+  z-index: 2;
+}
+
+.audio-btn.is-muted {
+  color: rgba(234, 223, 194, 0.62);
+  border-color: rgba(201, 157, 83, 0.12);
+}
+
 .start-btn:hover {
   transform: translateX(-50%) translateY(-2px);
   box-shadow:
@@ -276,5 +299,10 @@ kbd {
   .start-btn {
     bottom: 22px;
     width: calc(100% - 56px);
+  }
+
+  .audio-btn {
+    top: 18px;
+    right: 18px;
   }
 }

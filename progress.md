@@ -7,3 +7,5 @@ Original prompt: make me a fun mathing fantasy type game where you have fantasy 
 - Found and fixed three first-pass issues: particle alpha rendering, preserved spawning for special runes, and end-of-run / no-move board handling.
 - Validation status: local static server is running on port 4173; Playwright automation could not be executed because the `playwright` package is not installed in this environment.
 - Next: if browser automation becomes available, exercise the start flow and swap interactions against the running build and tune balance / polish from screenshots.
+- Visual overhaul pass: shifted the shell from bright fantasy to dark fantasy with blood-gold accents, gothic framing, darker copy, and ambient architectural silhouettes.
+- Canvas art overhaul: replaced emoji-like orb feel with faceted relic treatment, custom sigils per piece type, stronger special rune halos, and a more ominous moonlit board backdrop.

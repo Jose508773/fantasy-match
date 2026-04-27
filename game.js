@@ -10,12 +10,12 @@ const BOARD_Y = 312;
 const BOARD_W = COLS * CELL;
 const BOARD_H = ROWS * CELL;
 const TYPES = [
-  { key: "ember", fill: "#ff7e67", glow: "#ffb089", glyph: "🔥" },
-  { key: "moon", fill: "#83d8ff", glow: "#d8f4ff", glyph: "🌙" },
-  { key: "moss", fill: "#9adc77", glow: "#d8ffc1", glyph: "🍃" },
-  { key: "royal", fill: "#bf8cff", glow: "#e7d4ff", glyph: "✦" },
-  { key: "sun", fill: "#ffd466", glow: "#fff4bf", glyph: "☀" },
-  { key: "rose", fill: "#ff7fb6", glow: "#ffd1e5", glyph: "✿" },
+  { key: "blood", fill: "#b53e4c", glow: "#ef8691", glyph: "✢", icon: "blood" },
+  { key: "grave", fill: "#5bb1c5", glow: "#baeaf6", glyph: "☽", icon: "grave" },
+  { key: "thorn", fill: "#799449", glow: "#d4ecad", glyph: "❦", icon: "thorn" },
+  { key: "void", fill: "#7856b4", glow: "#c7b0ff", glyph: "✦", icon: "void" },
+  { key: "gold", fill: "#c89a47", glow: "#f3dc9b", glyph: "✧", icon: "gold" },
+  { key: "bone", fill: "#cfc4ae", glow: "#fff1dc", glyph: "☩", icon: "bone" },
 ];
 
 const state = {
@@ -46,6 +46,10 @@ function hexToRgba(hex, alpha) {
   const g = (int >> 8) & 255;
   const b = int & 255;
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
 }
 
 function randomType() {
@@ -91,7 +95,7 @@ function resetGame() {
   state.hovered = null;
   state.board = makeBoard();
   state.particles = [];
-  state.message = "The relic vault opens. Gather enchanted treasure.";
+  state.message = "The black vault yawns open. Feed it relics of ash and omen.";
   state.queuedResolutions = [];
   state.resolving = false;
   state.mode = "playing";
@@ -391,6 +395,7 @@ function update(dt) {
     for (const orb of row) {
       if (!orb) continue;
       orb.pulse += dt * 2;
+      orb.offsetX += Math.sin(state.tick * 2.2 + row.length + orb.type) * 0.008;
       orb.offsetY *= 0.78;
       if (Math.abs(orb.offsetY) < 0.2) orb.offsetY = 0;
       orb.offsetX *= 0.78;
@@ -416,24 +421,132 @@ function roundRect(x, y, w, h, r) {
   ctx.closePath();
 }
 
+function drawSigil(x, y, radius, palette) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.strokeStyle = "rgba(255, 244, 225, 0.76)";
+  ctx.lineWidth = 1.6;
+  ctx.lineCap = "round";
+
+  if (palette.icon === "blood") {
+    ctx.beginPath();
+    ctx.moveTo(0, -radius * 0.72);
+    ctx.lineTo(radius * 0.28, -radius * 0.1);
+    ctx.arc(0, radius * 0.18, radius * 0.26, -0.5, Math.PI + 0.5, true);
+    ctx.lineTo(-radius * 0.28, -radius * 0.1);
+    ctx.closePath();
+    ctx.stroke();
+  } else if (palette.icon === "grave") {
+    ctx.beginPath();
+    ctx.arc(0, 0, radius * 0.52, 0.5, Math.PI - 0.5);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(radius * 0.12, -radius * 0.08, radius * 0.34, 0.4, Math.PI - 0.3);
+    ctx.stroke();
+  } else if (palette.icon === "thorn") {
+    ctx.beginPath();
+    ctx.moveTo(0, radius * 0.56);
+    ctx.lineTo(0, -radius * 0.58);
+    ctx.moveTo(0, -radius * 0.08);
+    ctx.lineTo(-radius * 0.42, -radius * 0.42);
+    ctx.moveTo(0, radius * 0.1);
+    ctx.lineTo(radius * 0.44, -radius * 0.22);
+    ctx.stroke();
+  } else if (palette.icon === "void") {
+    ctx.beginPath();
+    ctx.moveTo(0, -radius * 0.62);
+    ctx.lineTo(radius * 0.22, -radius * 0.16);
+    ctx.lineTo(radius * 0.62, 0);
+    ctx.lineTo(radius * 0.22, radius * 0.16);
+    ctx.lineTo(0, radius * 0.62);
+    ctx.lineTo(-radius * 0.22, radius * 0.16);
+    ctx.lineTo(-radius * 0.62, 0);
+    ctx.lineTo(-radius * 0.22, -radius * 0.16);
+    ctx.closePath();
+    ctx.stroke();
+  } else if (palette.icon === "gold") {
+    ctx.beginPath();
+    for (let i = 0; i < 8; i += 1) {
+      const angle = (Math.PI / 4) * i;
+      const inner = i % 2 === 0 ? radius * 0.18 : radius * 0.54;
+      const px = Math.cos(angle) * inner;
+      const py = Math.sin(angle) * inner;
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.stroke();
+  } else if (palette.icon === "bone") {
+    ctx.beginPath();
+    ctx.moveTo(0, -radius * 0.54);
+    ctx.lineTo(0, radius * 0.54);
+    ctx.moveTo(-radius * 0.42, 0);
+    ctx.lineTo(radius * 0.42, 0);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(0, -radius * 0.64, radius * 0.16, 0, Math.PI * 2);
+    ctx.arc(0, radius * 0.64, radius * 0.16, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
+function drawSpire(x, width, height, hue) {
+  ctx.save();
+  ctx.translate(x, canvas.height);
+  ctx.fillStyle = hue;
+  ctx.beginPath();
+  ctx.moveTo(-width / 2, 0);
+  ctx.lineTo(-width * 0.32, -height * 0.42);
+  ctx.lineTo(-width * 0.18, -height * 0.42);
+  ctx.lineTo(-width * 0.12, -height);
+  ctx.lineTo(0, -height * 0.82);
+  ctx.lineTo(width * 0.12, -height);
+  ctx.lineTo(width * 0.18, -height * 0.42);
+  ctx.lineTo(width * 0.32, -height * 0.42);
+  ctx.lineTo(width / 2, 0);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
 function drawBackground() {
   const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
-  gradient.addColorStop(0, "#2f2149");
-  gradient.addColorStop(0.55, "#1d1530");
-  gradient.addColorStop(1, "#140f22");
+  gradient.addColorStop(0, "#201628");
+  gradient.addColorStop(0.48, "#100c16");
+  gradient.addColorStop(1, "#040306");
   ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  for (let i = 0; i < 36; i += 1) {
+  const moonGlow = ctx.createRadialGradient(360, 118, 12, 360, 118, 138);
+  moonGlow.addColorStop(0, "rgba(231, 182, 117, 0.34)");
+  moonGlow.addColorStop(1, "rgba(231, 182, 117, 0)");
+  ctx.fillStyle = moonGlow;
+  ctx.beginPath();
+  ctx.arc(360, 118, 140, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = "rgba(230, 198, 154, 0.82)";
+  ctx.beginPath();
+  ctx.arc(360, 118, 42, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = "rgba(120, 29, 47, 0.26)";
+  ctx.beginPath();
+  ctx.arc(374, 108, 18, 0, Math.PI * 2);
+  ctx.fill();
+
+  for (let i = 0; i < 42; i += 1) {
     const x = ((i * 83) % canvas.width) + Math.sin(state.tick * 0.5 + i) * 8;
     const y = ((i * 121) % canvas.height) + Math.cos(state.tick * 0.3 + i) * 10;
-    ctx.fillStyle = `rgba(255, 243, 204, ${0.08 + (i % 4) * 0.03})`;
+    ctx.fillStyle = `rgba(255, 243, 204, ${0.04 + (i % 4) * 0.02})`;
     ctx.beginPath();
     ctx.arc(x, y, 1.2 + (i % 3), 0, Math.PI * 2);
     ctx.fill();
   }
 
-  ctx.fillStyle = "rgba(255, 213, 131, 0.08)";
+  ctx.fillStyle = "rgba(110, 36, 50, 0.08)";
   ctx.beginPath();
   ctx.moveTo(0, 220);
   ctx.quadraticCurveTo(180, 140, 360, 220);
@@ -442,21 +555,44 @@ function drawBackground() {
   ctx.lineTo(0, 0);
   ctx.closePath();
   ctx.fill();
+
+  ctx.fillStyle = "rgba(18, 12, 24, 0.82)";
+  ctx.beginPath();
+  ctx.moveTo(0, 996);
+  ctx.quadraticCurveTo(140, 936, 280, 978);
+  ctx.quadraticCurveTo(410, 1020, 560, 944);
+  ctx.quadraticCurveTo(650, 904, 720, 962);
+  ctx.lineTo(720, 1280);
+  ctx.lineTo(0, 1280);
+  ctx.closePath();
+  ctx.fill();
+
+  drawSpire(80, 86, 244, "rgba(8, 7, 12, 0.96)");
+  drawSpire(174, 72, 198, "rgba(9, 8, 13, 0.92)");
+  drawSpire(612, 108, 286, "rgba(8, 7, 12, 0.96)");
+  drawSpire(534, 66, 186, "rgba(9, 8, 13, 0.9)");
+
+  const mist = ctx.createLinearGradient(0, 860, 0, 1180);
+  mist.addColorStop(0, "rgba(107, 43, 67, 0)");
+  mist.addColorStop(0.35, "rgba(107, 43, 67, 0.12)");
+  mist.addColorStop(1, "rgba(7, 5, 9, 0.42)");
+  ctx.fillStyle = mist;
+  ctx.fillRect(0, 820, canvas.width, 460);
 }
 
 function drawHeader() {
   ctx.textAlign = "left";
-  ctx.fillStyle = "#fce8b1";
+  ctx.fillStyle = "#efddbc";
   ctx.font = '800 58px "Uncial Antiqua"';
   ctx.fillText("Moonlit Relics", 58, 94);
   ctx.font = '500 24px "Cinzel"';
-  ctx.fillStyle = "rgba(252, 239, 196, 0.9)";
-  ctx.fillText("Harvest runes. Please the Moon Queen. Claim the vault.", 60, 130);
+  ctx.fillStyle = "rgba(229, 216, 191, 0.82)";
+  ctx.fillText("Bleed relics, break sigils, and tithe the Hollow Court.", 60, 130);
 
   roundRect(54, 160, 612, 112, 28);
-  ctx.fillStyle = "rgba(11, 8, 18, 0.46)";
+  ctx.fillStyle = "rgba(9, 7, 13, 0.56)";
   ctx.fill();
-  ctx.strokeStyle = "rgba(255, 222, 151, 0.16)";
+  ctx.strokeStyle = "rgba(201, 157, 83, 0.18)";
   ctx.lineWidth = 2;
   ctx.stroke();
 
@@ -468,34 +604,34 @@ function drawHeader() {
   ];
   stats.forEach(([label, value], index) => {
     const x = 82 + index * 145;
-    ctx.fillStyle = "rgba(255, 229, 172, 0.78)";
+    ctx.fillStyle = "rgba(212, 180, 125, 0.78)";
     ctx.font = '600 18px "Cinzel"';
     ctx.fillText(label, x, 195);
-    ctx.fillStyle = "#fff7db";
+    ctx.fillStyle = "#f7edd4";
     ctx.font = '700 32px "Cinzel"';
     ctx.fillText(String(value), x, 232);
   });
 
-  ctx.fillStyle = "rgba(255, 235, 184, 0.8)";
+  ctx.fillStyle = "rgba(220, 191, 141, 0.8)";
   ctx.font = '600 16px "Cinzel"';
   ctx.fillText("Mana", 548, 196);
   roundRect(548, 208, 92, 18, 9);
-  ctx.fillStyle = "rgba(255,255,255,0.08)";
+  ctx.fillStyle = "rgba(255,255,255,0.05)";
   ctx.fill();
   roundRect(548, 208, 92 * (state.mana / 100), 18, 9);
-  ctx.fillStyle = "#7fe3ff";
+  ctx.fillStyle = "#7b4fd0";
   ctx.fill();
 
   ctx.font = '500 19px "Cinzel"';
-  ctx.fillStyle = "rgba(248, 235, 202, 0.94)";
+  ctx.fillStyle = "rgba(241, 229, 202, 0.9)";
   ctx.fillText(state.message, 60, 268);
 }
 
 function drawBoard() {
   roundRect(42, 290, 636, 636, 32);
-  ctx.fillStyle = "rgba(8, 6, 14, 0.54)";
+  ctx.fillStyle = "rgba(7, 5, 10, 0.68)";
   ctx.fill();
-  ctx.strokeStyle = "rgba(255, 225, 156, 0.2)";
+  ctx.strokeStyle = "rgba(201, 157, 83, 0.2)";
   ctx.lineWidth = 2;
   ctx.stroke();
 
@@ -504,7 +640,7 @@ function drawBoard() {
       const x = BOARD_X + col * CELL;
       const y = BOARD_Y + row * CELL;
       roundRect(x + 3, y + 3, CELL - 6, CELL - 6, 18);
-      ctx.fillStyle = (row + col) % 2 === 0 ? "rgba(255,255,255,0.04)" : "rgba(255,231,189,0.03)";
+      ctx.fillStyle = (row + col) % 2 === 0 ? "rgba(255,255,255,0.03)" : "rgba(158,70,93,0.05)";
       ctx.fill();
     }
   }
@@ -519,10 +655,11 @@ function drawBoard() {
       const radius = 25 + Math.sin(orb.pulse) * 1.8;
 
       ctx.save();
-      ctx.shadowBlur = 24;
+      ctx.shadowBlur = 28;
       ctx.shadowColor = palette.glow;
       const glow = ctx.createRadialGradient(x - 8, y - 12, 4, x, y, 38);
-      glow.addColorStop(0, palette.glow);
+      glow.addColorStop(0, "rgba(255,255,255,0.95)");
+      glow.addColorStop(0.18, palette.glow);
       glow.addColorStop(1, palette.fill);
       ctx.fillStyle = glow;
       ctx.beginPath();
@@ -530,24 +667,50 @@ function drawBoard() {
       ctx.fill();
       ctx.restore();
 
-      ctx.strokeStyle = "rgba(255,255,255,0.38)";
-      ctx.lineWidth = 2;
+      ctx.fillStyle = "rgba(255,255,255,0.08)";
       ctx.beginPath();
-      ctx.arc(x, y, radius, 0, Math.PI * 2);
+      ctx.moveTo(x, y - radius * 0.84);
+      ctx.lineTo(x + radius * 0.58, y - radius * 0.16);
+      ctx.lineTo(x + radius * 0.36, y + radius * 0.62);
+      ctx.lineTo(x - radius * 0.38, y + radius * 0.62);
+      ctx.lineTo(x - radius * 0.58, y - radius * 0.16);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.strokeStyle = "rgba(255,247,225,0.4)";
+      ctx.lineWidth = 1.8;
+      ctx.beginPath();
+      ctx.moveTo(x, y - radius * 0.84);
+      ctx.lineTo(x + radius * 0.58, y - radius * 0.16);
+      ctx.lineTo(x + radius * 0.36, y + radius * 0.62);
+      ctx.lineTo(x - radius * 0.38, y + radius * 0.62);
+      ctx.lineTo(x - radius * 0.58, y - radius * 0.16);
+      ctx.closePath();
       ctx.stroke();
 
-      ctx.fillStyle = "rgba(255,255,255,0.88)";
-      ctx.font = '600 24px "Cinzel"';
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText(palette.glyph, x, y + 1);
+      ctx.strokeStyle = "rgba(255,255,255,0.14)";
+      ctx.beginPath();
+      ctx.moveTo(x, y - radius * 0.84);
+      ctx.lineTo(x, y + radius * 0.62);
+      ctx.moveTo(x + radius * 0.58, y - radius * 0.16);
+      ctx.lineTo(x - radius * 0.38, y + radius * 0.62);
+      ctx.moveTo(x - radius * 0.58, y - radius * 0.16);
+      ctx.lineTo(x + radius * 0.36, y + radius * 0.62);
+      ctx.stroke();
+
+      drawSigil(x, y + 1, radius, palette);
 
       if (orb.special) {
-        ctx.strokeStyle = orb.special === "burst" ? "#fff4b8" : "#dffbff";
-        ctx.lineWidth = 3;
+        ctx.strokeStyle = orb.special === "burst" ? "#e2b95f" : "#d7d0ff";
+        ctx.lineWidth = 2.5;
         ctx.beginPath();
         ctx.arc(x, y, radius + 7, 0, Math.PI * 2);
         ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(x, y, radius + 13 + Math.sin(state.tick * 4 + row + col) * 1.4, 0, Math.PI * 2);
+        ctx.globalAlpha = 0.38;
+        ctx.stroke();
+        ctx.globalAlpha = 1;
       }
     }
   }
@@ -556,7 +719,7 @@ function drawBoard() {
     const x = BOARD_X + state.selected.col * CELL + 4;
     const y = BOARD_Y + state.selected.row * CELL + 4;
     roundRect(x, y, CELL - 8, CELL - 8, 20);
-    ctx.strokeStyle = "#ffe59b";
+    ctx.strokeStyle = "#d14c62";
     ctx.lineWidth = 4;
     ctx.stroke();
   }
@@ -564,37 +727,37 @@ function drawBoard() {
 
 function drawFooter() {
   roundRect(54, 955, 612, 240, 28);
-  ctx.fillStyle = "rgba(14, 10, 23, 0.62)";
+  ctx.fillStyle = "rgba(10, 7, 14, 0.7)";
   ctx.fill();
-  ctx.strokeStyle = "rgba(255, 223, 159, 0.14)";
+  ctx.strokeStyle = "rgba(201, 157, 83, 0.14)";
   ctx.lineWidth = 2;
   ctx.stroke();
 
   ctx.textAlign = "left";
-  ctx.fillStyle = "#ffe7a7";
+  ctx.fillStyle = "#dfc286";
   ctx.font = '700 24px "Cinzel"';
-  ctx.fillText("Royal Ledger", 76, 995);
+  ctx.fillText("Ledger Of The Hollow Court", 76, 995);
 
   ctx.font = '500 20px "Cinzel"';
-  ctx.fillStyle = "rgba(250, 239, 211, 0.88)";
-  ctx.fillText(`Vault progress: ${Math.min(100, Math.round((state.score / state.goal) * 100))}%`, 76, 1034);
-  ctx.fillText(`Best cascade: x${state.bestCombo}`, 76, 1072);
-  ctx.fillText(`Arcane mana: ${state.mana}/100`, 76, 1110);
+  ctx.fillStyle = "rgba(241, 229, 202, 0.84)";
+  ctx.fillText(`Vault tithe: ${Math.min(100, Math.round((state.score / state.goal) * 100))}%`, 76, 1034);
+  ctx.fillText(`Dark cascade: x${state.bestCombo}`, 76, 1072);
+  ctx.fillText(`Forbidden mana: ${state.mana}/100`, 76, 1110);
 
-  ctx.fillStyle = "rgba(246, 227, 185, 0.72)";
+  ctx.fillStyle = "rgba(225, 202, 159, 0.68)";
   ctx.font = '500 18px "Cinzel"';
-  ctx.fillText("Craft four-matches for line runes. Craft five-matches for burst relics.", 76, 1164);
+  ctx.fillText("Four relics forge line hexes. Five relics awaken a graveburst sigil.", 76, 1164);
 
   if (state.mode === "menu") {
-    ctx.fillStyle = "rgba(255, 242, 206, 0.95)";
+    ctx.fillStyle = "rgba(244, 229, 201, 0.92)";
     ctx.font = '700 28px "Cinzel"';
-    ctx.fillText("Begin your quest with the button below.", 76, 1088);
+    ctx.fillText("Step into the rite with the seal below.", 76, 1088);
   }
 
   if (state.mode === "gameover") {
-    ctx.fillStyle = state.score >= state.goal ? "#bfffd7" : "#ffd6b3";
+    ctx.fillStyle = state.score >= state.goal ? "#d9d0ff" : "#ffcfb8";
     ctx.font = '700 28px "Cinzel"';
-    ctx.fillText(state.score >= state.goal ? "Victory for the Moon Queen." : "The vault remains hungry.", 76, 1088);
+    ctx.fillText(state.score >= state.goal ? "The court accepts your offering." : "The vault remains unsated.", 76, 1088);
   }
 }
 
@@ -611,21 +774,21 @@ function drawParticles() {
 
 function drawMenuOverlay() {
   if (state.mode === "playing") return;
-  ctx.fillStyle = "rgba(8, 5, 14, 0.36)";
+  ctx.fillStyle = "rgba(7, 4, 10, 0.44)";
   roundRect(84, 400, 552, 196, 28);
   ctx.fill();
-  ctx.strokeStyle = "rgba(255, 221, 153, 0.18)";
+  ctx.strokeStyle = "rgba(201, 157, 83, 0.16)";
   ctx.lineWidth = 2;
   ctx.stroke();
   ctx.textAlign = "center";
-  ctx.fillStyle = "#fff0c4";
+  ctx.fillStyle = "#f4e3be";
   ctx.font = '700 36px "Cinzel"';
-  ctx.fillText(state.mode === "menu" ? "Moonlit Ceremony" : "Quest Complete", canvas.width / 2, 470);
+  ctx.fillText(state.mode === "menu" ? "The Hollow Ceremony" : "The Rite Is Complete", canvas.width / 2, 470);
   ctx.font = '500 22px "Cinzel"';
   ctx.fillText(
     state.mode === "menu"
-      ? "Match relics, build cascades, and awaken the vault."
-      : "Press R or the button to begin another enchanted run.",
+      ? "Match cursed relics, awaken grave sigils, and feed the moonless vault."
+      : "Press R or the seal below to begin another descent.",
     canvas.width / 2,
     518,
   );
